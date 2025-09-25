@@ -1,5 +1,6 @@
 use crate::time::{Duration, Instant};
-use std::sync::RwLock;
+// Asset resolver imports removed - now using Arc in mod.rs
+use std::sync::{Mutex, RwLock};
 use std::{fs, rc::Rc, sync::Arc};
 
 use crate::actions::open_url_policy::OpenUrlPolicy;
@@ -10,9 +11,11 @@ use crate::{
     lottie_renderer::{LottieRenderer, LottieRendererError},
     Marker, MarkersMap, StateMachineEngine,
 };
+use std::ffi::c_void;
 use crate::{
     transform_theme_to_lottie_slots, DotLottieManager, Manifest, Renderer, StateMachineEngineError,
 };
+use crate::lottie_renderer::AssetResolverFn;
 
 use crate::StateMachineInternalObserver;
 use crate::StateMachineObserver;
@@ -833,10 +836,43 @@ impl DotLottieRuntime {
                             )
                         };
 
+                    // let Some(manager) = &mut self.dotlottie_manager else {
+                    //     println!("[dotlottie-rs] dotlottie_manager is None");
+                    //     return false;
+                    // };
+                    let manager_ptr = manager as *const DotLottieManager as *mut c_void;
+
+                    unsafe extern "C" fn asset_resolver_callback(
+                        src: *const i8,
+                        user_data: *mut c_void
+                    ) -> *mut Vec<u8> {
+                        let src_str = match std::ffi::CStr::from_ptr(src).to_str() {
+                            Ok(s) => s,
+                            Err(_) => return std::ptr::null_mut(),
+                        };
+
+                        println!("[dotlottie-rs] asset resolver called for: {}", src_str);
+
+                        let manager = &*(user_data as *const DotLottieManager);
+                        match manager.resolve_asset(src_str) {
+                            Ok(asset_data) => {
+                                println!("[dotlottie-rs] asset resolved successfully, size: {} bytes", asset_data.len());
+                                Box::into_raw(Box::new(asset_data))
+                            }
+                            Err(_) => {
+                                println!("[dotlottie-rs] failed to resolve asset: {}", src_str);
+                                std::ptr::null_mut()
+                            }
+                        }
+                    }
+
                     if let Ok(animation_data) = active_animation {
                         self.markers = extract_markers(animation_data.as_str());
                         let animation_loaded = self.load_animation_common(
-                            |renderer, w, h| renderer.load_data(&animation_data, w, h),
+                            |renderer, w, h| {
+                                renderer.set_asset_resolver(Some(asset_resolver_callback), manager_ptr)?;
+                                renderer.load_data(&animation_data, w, h)
+                            },
                             width,
                             height,
                         );
@@ -992,6 +1028,15 @@ impl DotLottieRuntime {
 
     pub fn set_slots(&mut self, slots: &str) -> bool {
         self.renderer.set_slots(slots).is_ok()
+    }
+
+    pub fn set_asset_resolver(
+        &mut self,
+        resolver: Option<AssetResolverFn>,
+        user_data: *mut c_void,
+    ) -> bool {
+        println!("[dotlottie-player] set asset resolver");
+        self.renderer.set_asset_resolver(resolver, user_data).is_ok()
     }
 
     pub fn active_animation_id(&self) -> &str {
@@ -1439,6 +1484,15 @@ impl DotLottiePlayerContainer {
 
     pub fn set_slots(&self, slots: &str) -> bool {
         self.runtime.write().unwrap().set_slots(slots)
+    }
+
+    pub fn set_asset_resolver(
+        &self,
+        resolver: Option<AssetResolverFn>,
+        user_data: *mut c_void,
+    ) -> bool {
+      println!("[dotlottie-player container] set asset resolver");
+        self.runtime.write().unwrap().set_asset_resolver(resolver, user_data)
     }
 
     pub fn animation_size(&self) -> Vec<f32> {
@@ -2291,6 +2345,14 @@ impl DotLottiePlayer {
 
     pub fn set_slots(&self, slots: &str) -> bool {
         self.player.write().unwrap().set_slots(slots)
+    }
+
+    pub fn set_asset_resolver(
+        &self,
+        resolver: Option<AssetResolverFn>,
+        user_data: *mut c_void,
+    ) -> bool {
+        self.player.write().unwrap().set_asset_resolver(resolver, user_data)
     }
 
     pub fn markers(&self) -> Vec<Marker> {

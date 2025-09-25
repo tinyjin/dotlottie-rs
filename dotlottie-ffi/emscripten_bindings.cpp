@@ -1,8 +1,12 @@
 #include "dotlottie_player.hpp"
 #include <emscripten/bind.h>
 #include <emscripten/emscripten.h>
+#include <emscripten/val.h>
 #include <optional>
 #include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 
 using namespace emscripten;
 using namespace dotlottie_player;
@@ -220,6 +224,32 @@ void stateMachineInternalUnsubscribe(DotLottiePlayer &player, std::shared_ptr<St
     player.state_machine_internal_unsubscribe(observer);
 }
 
+// Asset loader callback class for JavaScript integration
+class CallbackAssetResolver {
+public:
+    CallbackAssetResolver() = default;
+    
+    void setAssetResolver(val cb) {
+        load_asset_callback_ = [cb](const std::string& src) -> std::vector<uint8_t> {
+            if (cb.isUndefined() || cb.isNull()) return std::vector<uint8_t>();
+
+            val result = cb(src);
+            if (result != val::undefined() && result != val::null()) {
+                // Convert JavaScript Uint8Array to std::vector<uint8_t>
+                return vecFromJSArray<uint8_t>(result);
+            }
+            return std::vector<uint8_t>();
+        };
+    }
+    
+    std::function<std::vector<uint8_t>(const std::string&)> getLoader() {
+        return load_asset_callback_;
+    }
+    
+private:
+    std::function<std::vector<uint8_t>(const std::string&)> load_asset_callback_;
+};
+
 EMSCRIPTEN_BINDINGS(observer_callbacks) {
     class_<CallbackObserver, base<Observer>>("CallbackObserver")
         .constructor<>()
@@ -254,6 +284,12 @@ EMSCRIPTEN_BINDINGS(state_machine_observer_callbacks) {
         .function("setOnBooleanInputValueChange", &CallbackStateMachineObserver::setOnBooleanInputValueChange)
         .function("setOnInputFired", &CallbackStateMachineObserver::setOnInputFired)
         .function("setOnError", &CallbackStateMachineObserver::setOnError);
+}
+
+EMSCRIPTEN_BINDINGS(asset_resolver_callback) {
+    class_<CallbackAssetResolver>("CallbackAssetResolver")
+        .constructor<>()
+        .function("setAssetResolver", &CallbackAssetResolver::setAssetResolver);
 }
 
 EMSCRIPTEN_BINDINGS(DotLottiePlayer)

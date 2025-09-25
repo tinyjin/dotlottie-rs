@@ -165,20 +165,17 @@
 
       const observerHandle = dotLottiePlayer.subscribe(observer);
 
+      console.log(Module.CallbackAssetResolver);
+      const assetResolver = new Module.CallbackAssetResolver();
+      assetResolver.setAssetResolver(async (src) => {
+        console.log(`Loading asset: ${src}`);
+        const response = await fetch(src);
+        const arrayBuffer = await response.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        return uint8Array;
+      });
 
-      
-      // Alternative: Create an asset loader using the JSAssetLoader class
-      // const assetLoader = new Module.JSAssetLoader();
-      // assetLoader.setLoadAsset(async (src) => {
-      //   console.log(`Loading asset: ${src}`);
-      //   try {
-      //     const response = loadExternalImage(src);
-      //     return response;
-      //   } catch (error) {
-      //     console.error(`Failed to load asset: ${src}`, error);
-      //     return null;
-      //   }
-      // });
+      assetResolver.setAssetResolver(assetResolver);
 
       // // Helper function to load external images and convert them to uint8Array
       // async function loadExternalImage(imageUrl) {

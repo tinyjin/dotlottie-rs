@@ -32,6 +32,11 @@ fn into_lottie<R: Renderer>(_err: R::Error) -> LottieRendererError {
     LottieRendererError::RendererError
 }
 
+use std::ffi::c_void;
+
+// New Asset Resolver interface: src -> Vec<u8>
+pub type AssetResolverFn = unsafe extern "C" fn(*const i8, *mut c_void) -> *mut Vec<u8>;
+
 pub trait LottieRenderer {
     fn load_data(&mut self, data: &str, width: u32, height: u32)
         -> Result<(), LottieRendererError>;
@@ -90,6 +95,12 @@ pub trait LottieRenderer {
     fn tween_update(&mut self, progress: Option<f32>) -> Result<bool, LottieRendererError>;
 
     fn tween_stop(&mut self) -> Result<(), LottieRendererError>;
+
+    fn set_asset_resolver(
+        &mut self,
+        resolver: Option<AssetResolverFn>,
+        user_data: *mut c_void,
+    ) -> Result<(), LottieRendererError>;
 }
 
 impl dyn LottieRenderer {
@@ -107,11 +118,12 @@ impl dyn LottieRenderer {
             background_color: 0,
             buffer: vec![],
             layout: Layout::default(),
+            asset_resolver: None,
+            asset_resolver_user_data: std::ptr::null_mut(),
         })
     }
 }
 
-#[derive(Default)]
 struct LottieRendererImpl<R: Renderer> {
     animation: Option<R::Animation>,
     background_shape: Option<R::Shape>,
@@ -125,6 +137,8 @@ struct LottieRendererImpl<R: Renderer> {
     background_color: u32,
     buffer: Vec<u32>,
     layout: Layout,
+    asset_resolver: Option<AssetResolverFn>,
+    asset_resolver_user_data: *mut c_void,
 }
 
 impl<R: Renderer> LottieRendererImpl<R> {
@@ -178,6 +192,19 @@ impl<R: Renderer> LottieRendererImpl<R> {
 
     fn load_animation(&mut self, data: &str) -> Result<R::Animation, LottieRendererError> {
         let mut animation = R::Animation::default();
+
+        println!("[lottie_renderer > mod.rs] load animation (set default)");
+
+        // // Set the resolver before loading data
+        if let Some(resolver) = self.asset_resolver {
+          if animation.set_asset_resolver(Some(resolver), self.asset_resolver_user_data).is_ok() {
+              println!("set_asset_resolver success");
+          } else {
+              println!("set_asset_resolver failed");
+          }
+        }
+
+        println!("[dotlottie-rs] load animation");
 
         #[cfg(feature = "tvg-v0")]
         animation
@@ -554,6 +581,16 @@ impl<R: Renderer> LottieRenderer for LottieRendererImpl<R> {
         self.get_animation()?
             .intersect(x, y, layer_name)
             .map_err(into_lottie::<R>)
+    }
+
+    fn set_asset_resolver(
+        &mut self,
+        resolver: Option<AssetResolverFn>,
+        user_data: *mut c_void,
+    ) -> Result<(), LottieRendererError> {
+        self.asset_resolver = resolver;
+        self.asset_resolver_user_data = user_data;
+        Ok(())
     }
 }
 

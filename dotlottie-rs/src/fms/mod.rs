@@ -7,6 +7,7 @@ pub use manifest::*;
 use serde_json::Value;
 use std::cell::RefCell;
 use std::io::{self, Read};
+use std::path;
 use zip::ZipArchive;
 
 const BASE64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -61,6 +62,24 @@ impl DotLottieManager {
         self.get_animation(&self.active_animation_id)
     }
 
+    // resolve_asset 함수 만들기
+    pub fn resolve_asset(&self, asset_path: &str) -> Result<Vec<u8>, DotLottieError> {
+        let mut archive = self.archive.borrow_mut();
+
+        let image_prefix = if self.version == 2 { "i/" } else { "images/" };
+        let asset_name = asset_path.split(path::MAIN_SEPARATOR).last().unwrap_or("");
+        let asset_path = format!("{image_prefix}{asset_name}");
+
+        if let Ok(mut result) = archive.by_name(&asset_path) {
+            let mut content = Vec::with_capacity(result.size() as usize);
+            if result.read_to_end(&mut content).is_ok() {
+                return Ok(content);
+            }
+        }
+
+        Err(DotLottieError::FileFindError)
+    }
+
     pub fn get_animation(&self, animation_id: &str) -> Result<String, DotLottieError> {
         let mut archive = self.archive.borrow_mut();
 
@@ -85,6 +104,7 @@ impl DotLottieManager {
         let mut lottie_animation: Value =
             serde_json::from_str(animation_data).map_err(|_| DotLottieError::ReadContentError)?;
 
+        // TODO: 이쪽을 AssetResolver로 대체 필요
         if let Some(assets) = lottie_animation
             .get_mut("assets")
             .and_then(|v| v.as_array_mut())
@@ -101,28 +121,30 @@ impl DotLottieManager {
                         if p_str.starts_with(DATA_IMAGE_PREFIX) {
                             asset_obj.insert("e".to_string(), embedded_flag.clone());
                         } else {
-                            asset_path.clear();
-                            asset_path.push_str(image_prefix);
-                            asset_path.push_str(p_str.trim_matches('"'));
+                            // 이미지 Path 케이스
+                            // NOTE: 외부 이미지 Asset Resolver로 처리
+                            // asset_path.clear();
+                            // asset_path.push_str(image_prefix);
+                            // asset_path.push_str(p_str.trim_matches('"'));
 
-                            if let Ok(mut result) = archive.by_name(&asset_path) {
-                                let mut content = Vec::with_capacity(result.size() as usize);
-                                if result.read_to_end(&mut content).is_ok() {
-                                    let image_ext = p_str
-                                        .rfind('.')
-                                        .map(|i| &p_str[i + 1..])
-                                        .unwrap_or(DEFAULT_EXT);
-                                    let image_data_base64 = Self::encode_base64(&content);
+                            // if let Ok(mut result) = archive.by_name(&asset_path) {
+                            //     let mut content = Vec::with_capacity(result.size() as usize);
+                            //     if result.read_to_end(&mut content).is_ok() {
+                            //         let image_ext = p_str
+                            //             .rfind('.')
+                            //             .map(|i| &p_str[i + 1..])
+                            //             .unwrap_or(DEFAULT_EXT);
+                            //         let image_data_base64 = Self::encode_base64(&content);
 
-                                    let data_url = format!(
-                                        "{DATA_IMAGE_PREFIX}{image_ext}{BASE64_PREFIX}{image_data_base64}"
-                                    );
+                            //         let data_url = format!(
+                            //             "{DATA_IMAGE_PREFIX}{image_ext}{BASE64_PREFIX}{image_data_base64}"
+                            //         );
 
-                                    asset_obj.insert("u".to_string(), empty_u.clone());
-                                    asset_obj.insert("p".to_string(), Value::String(data_url));
-                                    asset_obj.insert("e".to_string(), embedded_flag.clone());
-                                }
-                            }
+                            //         asset_obj.insert("u".to_string(), empty_u.clone());
+                            //         asset_obj.insert("p".to_string(), Value::String(data_url));
+                            //         asset_obj.insert("e".to_string(), embedded_flag.clone());
+                            //     }
+                            // }
                         }
                     }
                 }
